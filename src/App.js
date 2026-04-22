@@ -137,17 +137,21 @@ function MediaPoster({ item, className, imageClassName }) {
 }
 
 // ─── SEEK PLAYER (iframe embed) ───────────────────────────────────────────────
-function SeekPlayer({ url, onTimeUpdate, onEnded, onPause, externalRef }) {
+// key={url} musi być przekazany przez rodzica — React wtedy niszczy i tworzy iframe od nowa
+
+function SeekPlayer({ url, externalRef, mediaId, episodeId }) {
   const iframeRef = useRef(null);
   const wrapRef = useRef(null);
-  const [isFs, setIsFs] = useState(false);
 
-  // Expose iframe ref externally if needed
+  // Klucz localStorage dla progresu (per odcinek lub per film)
+  const storageKey = episodeId ? `fp_ep_${episodeId}` : `fp_media_${mediaId}`;
+
+  // Expose ref externally
   useEffect(() => {
     if (externalRef) externalRef.current = iframeRef.current;
   }, [externalRef]);
 
-  // Auto-pause when tab hidden
+  // Auto-pause gdy zmiana karty
   useEffect(() => {
     const onVisibility = () => {
       if (document.hidden && iframeRef.current) {
@@ -158,6 +162,23 @@ function SeekPlayer({ url, onTimeUpdate, onEnded, onPause, externalRef }) {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
+  // Nasłuchuj na postMessage z iframea (jeśli SeekStreaming je wysyła)
+  useEffect(() => {
+    if (!url) return;
+    const handleMsg = (e) => {
+      if (!e.data) return;
+      const { type, currentTime, duration } = e.data;
+      if (currentTime != null && currentTime > 0) {
+        try { localStorage.setItem(storageKey, JSON.stringify({ t: currentTime, d: duration || 0, ts: Date.now() })); } catch {}
+      }
+      if (type === 'ended') {
+        try { localStorage.removeItem(storageKey); } catch {}
+      }
+    };
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, [url, storageKey]);
+
   if (!url) {
     return (
       <div className="flex h-full w-full items-center justify-center text-xs font-black uppercase text-zinc-700">
@@ -166,11 +187,29 @@ function SeekPlayer({ url, onTimeUpdate, onEnded, onPause, externalRef }) {
     );
   }
 
+  // Dodaj zapisany czas do URL jeśli SeekStreaming go obsługuje (parametr t=)
+  let finalUrl = url;
+  try {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      const { t, ts } = JSON.parse(saved);
+      // Tylko jeśli zapisany jest < 7 dni temu i > 5s
+      if (t > 5 && ts && (Date.now() - ts) < 7 * 24 * 3600 * 1000) {
+        const u = new URL(url);
+        // SeekStreaming może obsługiwać #t= lub ?t= — próbujemy hash
+        if (!u.hash.includes('t=')) {
+          u.hash = u.hash + (u.hash ? '&t=' : 't=') + Math.floor(t);
+        }
+        finalUrl = u.toString();
+      }
+    }
+  } catch {}
+
   return (
     <div ref={wrapRef} className="relative w-full h-full bg-black">
       <iframe
         ref={iframeRef}
-        src={url}
+        src={finalUrl}
         className="w-full h-full border-0"
         allowFullScreen
         allow="autoplay; fullscreen; picture-in-picture"
@@ -309,10 +348,19 @@ export default function App() {
 
   const flushWatchProgress = useCallback(async () => {
     if (!user?.id || !selectedItem?.id) return;
-    const t = lastKnownTimeRef.current;
-    const d = lastKnownDurRef.current;
+    // Próbuj localStorage najpierw (bardziej aktualny)
+    const key = activeEpisodeId ? `fp_ep_${activeEpisodeId}` : `fp_media_${selectedItem.id}`;
+    let t = lastKnownTimeRef.current;
+    let d = lastKnownDurRef.current;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.t > t) { t = parsed.t; d = parsed.d || 0; }
+      }
+    } catch {}
     if (t > 0) await saveWatchProgress(t, d);
-  }, [user?.id, selectedItem?.id, saveWatchProgress]);
+  }, [user?.id, selectedItem?.id, activeEpisodeId, saveWatchProgress]);
 
   const removeContinueEntry = async (historyId) => {
     await supabase.from('watch_history').delete().eq('id', historyId);
@@ -341,16 +389,30 @@ export default function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, [saveWatchProgress]);
 
-  // Timer backup co 30s — na wypadek gdy SeekStreaming nie wysyła postMessage
+  // Timer backup co 30s — czyta progres z localStorage (zapisany przez SeekPlayer)
   useEffect(() => {
     if (!user?.id || !selectedItem?.id) return;
     const interval = setInterval(() => {
+      // Czytaj z localStorage (zapisany przez SeekPlayer przez postMessage)
+      const key = activeEpisodeId ? `fp_ep_${activeEpisodeId}` : `fp_media_${selectedItem.id}`;
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved) {
+          const { t, d } = JSON.parse(saved);
+          if (t > CONTINUE_MIN_SECONDS) {
+            lastKnownTimeRef.current = t;
+            lastKnownDurRef.current = d || 0;
+            saveWatchProgress(t, d || 0);
+          }
+        }
+      } catch {}
+      // Fallback: użyj lastKnownTimeRef jeśli postMessage działało
       const t = lastKnownTimeRef.current;
       const d = lastKnownDurRef.current;
       if (t > CONTINUE_MIN_SECONDS) saveWatchProgress(t, d);
     }, 30000);
     return () => clearInterval(interval);
-  }, [user?.id, selectedItem?.id, saveWatchProgress]);
+  }, [user?.id, selectedItem?.id, activeEpisodeId, saveWatchProgress]);
 
   // ── Media modal ──
   const safeSeasonKey = (ep) => String(ep.season_key ?? ep.season_label ?? ep.season ?? ep.season_number ?? 1);
@@ -808,7 +870,7 @@ export default function App() {
             <div className="space-y-6">
               {/* PLAYER */}
               <div className="w-full bg-black rounded-[2rem] overflow-hidden border border-white/5 shadow-2xl" style={{ aspectRatio: '16/9' }}>
-                <SeekPlayer url={activeVideo} externalRef={iframeRef} />
+                <SeekPlayer key={activeVideo || 'empty'} url={activeVideo} externalRef={iframeRef} mediaId={selectedItem?.id} episodeId={activeEpisodeId} />
               </div>
 
               {/* INFO */}
