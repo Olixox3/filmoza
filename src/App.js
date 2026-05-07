@@ -23,6 +23,7 @@ const ACCENT = '#e91e63';
 const WATCH_SAVE_INTERVAL_MS = 10000;
 const CONTINUE_MIN_SECONDS = 5;
 const COMPLETED_FRACTION = 0.92;
+const ADMIN_PIN = '7821';
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function isSupabaseConfigured() {
@@ -1091,4 +1092,68 @@ export default function App() {
       )}
     </div>
   );
+}
+
+
+// ============================================================================
+// FILMOZA HOMEPAGE NEW FEATURES
+// ============================================================================
+
+export const homepageSections = [
+  'continueWatching',
+  'latestAdded',
+  'popularMedia'
+];
+
+export async function registerMediaClick(supabase, mediaId, user) {
+  const anonymousId =
+    localStorage.getItem('anonymous_id') || crypto.randomUUID();
+
+  localStorage.setItem('anonymous_id', anonymousId);
+
+  let query = supabase
+    .from('media_clicks')
+    .select('*')
+    .eq('media_id', mediaId)
+    .gt(
+      'created_at',
+      new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+    );
+
+  if (user?.id) {
+    query = query.eq('user_id', user.id);
+  } else {
+    query = query.eq('anonymous_id', anonymousId);
+  }
+
+  const { data } = await query.limit(1);
+
+  if (data?.length) return;
+
+  await supabase.from('media_clicks').insert({
+    media_id: mediaId,
+    user_id: user?.id || null,
+    anonymous_id: user?.id ? null : anonymousId
+  });
+}
+
+export async function loadContinueWatching(supabase, userId) {
+  return await supabase
+    .from('watch_history')
+    .select('*, media(*), episodes(*)')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+}
+
+export async function loadPopularMedia(supabase) {
+  return await supabase
+    .from('most_popular_media')
+    .select('*');
+}
+
+export async function loadCustomCategories(supabase) {
+  return await supabase
+    .from('custom_categories')
+    .select('*, category_items(*, media(*))')
+    .order('position');
 }
