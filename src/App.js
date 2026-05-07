@@ -33,7 +33,7 @@ export default function App() {
       setIsAdmin(true)
     }
 
-    await loadHomepage(user)
+    loadHomepage(user)
   }
 
   async function loadHomepage(currentUser) {
@@ -110,6 +110,24 @@ export default function App() {
     }
   }
 
+  async function openMedia(media) {
+    await registerMediaClick(media.id)
+
+    window.location.href = `/watch/${media.id}`
+  }
+
+  async function removeFromHistory(mediaId) {
+    if (!user) return
+
+    await supabase
+      .from('watch_history')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('media_id', mediaId)
+
+    loadHomepage(user)
+  }
+
   async function unlockAdmin() {
     const pin = prompt('PIN admina')
 
@@ -137,7 +155,7 @@ export default function App() {
   }
 
   async function addMediaToCategory(categoryId) {
-    const mediaId = prompt('ID filmu/serialu')
+    const mediaId = prompt('ID filmu')
 
     if (!mediaId) return
 
@@ -151,81 +169,86 @@ export default function App() {
     loadHomepage(user)
   }
 
-  async function deleteCategory(categoryId) {
-    await supabase
-      .from('custom_categories')
-      .delete()
-      .eq('id', categoryId)
-
-    loadHomepage(user)
-  }
-
-  async function removeFromHistory(mediaId) {
-    if (!user) return
-
-    await supabase
-      .from('watch_history')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('media_id', mediaId)
-
-    loadHomepage(user)
-  }
-
-  async function openMedia(media) {
-    await registerMediaClick(media.id)
-
-    console.log('OPEN MEDIA', media)
-  }
-
   function Row({ title, items, continueMode = false }) {
     return (
       <div style={{ marginBottom: 40 }}>
-        <h2>{title}</h2>
+        <h2
+          style={{
+            marginBottom: 14,
+            fontSize: 24,
+            fontWeight: 700
+          }}
+        >
+          {title}
+        </h2>
 
         <div
           style={{
             display: 'flex',
+            gap: 16,
             overflowX: 'auto',
-            gap: 16
+            paddingBottom: 10
           }}
         >
           {items?.map(item => {
             const media = continueMode ? item.media : item
+
+            if (!media) return null
 
             return (
               <div
                 key={item.id}
                 style={{
                   minWidth: 220,
-                  position: 'relative'
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: '0.2s'
                 }}
               >
                 <img
-                  src={media?.poster_path}
-                  alt=''
+                  src={
+                    media.poster_path ||
+                    media.backdrop_path
+                  }
+                  alt={media.title}
                   onClick={() => openMedia(media)}
                   style={{
                     width: '100%',
-                    borderRadius: 12,
-                    cursor: 'pointer'
+                    height: 124,
+                    objectFit: 'cover',
+                    borderRadius: 14
                   }}
                 />
 
                 {continueMode && (
                   <button
-                    onClick={() => removeFromHistory(media.id)}
+                    onClick={() =>
+                      removeFromHistory(media.id)
+                    }
                     style={{
                       position: 'absolute',
                       top: 10,
-                      right: 10
+                      right: 10,
+                      border: 'none',
+                      borderRadius: 999,
+                      width: 28,
+                      height: 28,
+                      cursor: 'pointer'
                     }}
                   >
-                    X
+                    ✕
                   </button>
                 )}
 
-                <p>{media?.title}</p>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 15,
+                    fontWeight: 500
+                  }}
+                >
+                  {media.title}
+                </div>
               </div>
             )
           })}
@@ -237,9 +260,9 @@ export default function App() {
   return (
     <div
       style={{
-        background: '#0f1117',
-        color: 'white',
+        background: '#0b0f1a',
         minHeight: '100vh',
+        color: 'white',
         padding: 20
       }}
     >
@@ -247,10 +270,18 @@ export default function App() {
         style={{
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          marginBottom: 30
         }}
       >
-        <h1>FILMOZA</h1>
+        <h1
+          style={{
+            fontSize: 42,
+            fontWeight: 800
+          }}
+        >
+          FILMOZA
+        </h1>
 
         <div
           style={{
@@ -259,13 +290,29 @@ export default function App() {
           }}
         >
           {!isAdmin && (
-            <button onClick={unlockAdmin}>
+            <button
+              onClick={unlockAdmin}
+              style={{
+                padding: '10px 18px',
+                borderRadius: 10,
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
               Admin
             </button>
           )}
 
           {isAdmin && (
-            <button onClick={createCategory}>
+            <button
+              onClick={createCategory}
+              style={{
+                padding: '10px 18px',
+                borderRadius: 10,
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
               Dodaj kategorię
             </button>
           )}
@@ -299,35 +346,38 @@ export default function App() {
               alignItems: 'center'
             }}
           >
-            <h2>{category.name}</h2>
+            <h2
+              style={{
+                marginBottom: 14,
+                fontSize: 24,
+                fontWeight: 700
+              }}
+            >
+              {category.name}
+            </h2>
 
             {isAdmin && (
-              <div
+              <button
+                onClick={() =>
+                  addMediaToCategory(category.id)
+                }
                 style={{
-                  display: 'flex',
-                  gap: 10
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  border: 'none',
+                  cursor: 'pointer'
                 }}
               >
-                <button
-                  onClick={() => addMediaToCategory(category.id)}
-                >
-                  Dodaj film
-                </button>
-
-                <button
-                  onClick={() => deleteCategory(category.id)}
-                >
-                  Usuń
-                </button>
-              </div>
+                Dodaj film
+              </button>
             )}
           </div>
 
           <div
             style={{
               display: 'flex',
-              overflowX: 'auto',
               gap: 16,
+              overflowX: 'auto',
               marginBottom: 40
             }}
           >
@@ -335,21 +385,36 @@ export default function App() {
               <div
                 key={item.id}
                 style={{
-                  minWidth: 220
+                  minWidth: 220,
+                  cursor: 'pointer'
                 }}
               >
                 <img
-                  src={item.media?.poster_path}
-                  alt=''
-                  onClick={() => openMedia(item.media)}
+                  src={
+                    item.media?.poster_path ||
+                    item.media?.backdrop_path
+                  }
+                  alt={item.media?.title}
+                  onClick={() =>
+                    openMedia(item.media)
+                  }
                   style={{
                     width: '100%',
-                    borderRadius: 12,
-                    cursor: 'pointer'
+                    height: 124,
+                    objectFit: 'cover',
+                    borderRadius: 14
                   }}
                 />
 
-                <p>{item.media?.title}</p>
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 15,
+                    fontWeight: 500
+                  }}
+                >
+                  {item.media?.title}
+                </div>
               </div>
             ))}
           </div>
