@@ -1096,14 +1096,8 @@ export default function App() {
 
 
 // ============================================================================
-// FILMOZA HOMEPAGE NEW FEATURES
+// NOWE FUNKCJE HOMEPAGE
 // ============================================================================
-
-export const homepageSections = [
-  'continueWatching',
-  'latestAdded',
-  'popularMedia'
-];
 
 export async function registerMediaClick(supabase, mediaId, user) {
   const anonymousId =
@@ -1114,11 +1108,7 @@ export async function registerMediaClick(supabase, mediaId, user) {
   let query = supabase
     .from('media_clicks')
     .select('*')
-    .eq('media_id', mediaId)
-    .gt(
-      'created_at',
-      new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
-    );
+    .eq('media_id', mediaId);
 
   if (user?.id) {
     query = query.eq('user_id', user.id);
@@ -1128,32 +1118,71 @@ export async function registerMediaClick(supabase, mediaId, user) {
 
   const { data } = await query.limit(1);
 
-  if (data?.length) return;
-
-  await supabase.from('media_clicks').insert({
-    media_id: mediaId,
-    user_id: user?.id || null,
-    anonymous_id: user?.id ? null : anonymousId
-  });
+  if (!data?.length) {
+    await supabase.from('media_clicks').insert({
+      media_id: mediaId,
+      user_id: user?.id || null,
+      anonymous_id: user?.id ? null : anonymousId
+    });
+  }
 }
 
-export async function loadContinueWatching(supabase, userId) {
-  return await supabase
-    .from('watch_history')
-    .select('*, media(*), episodes(*)')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
-}
+export async function loadHomepageCategories(supabase, user) {
+  const latestAdded = await supabase
+    .from('media')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(20);
 
-export async function loadPopularMedia(supabase) {
-  return await supabase
+  const popularMedia = await supabase
     .from('most_popular_media')
-    .select('*');
+    .select('*')
+    .limit(20);
+
+  let continueWatching = { data: [] };
+
+  if (user?.id) {
+    continueWatching = await supabase
+      .from('watch_history')
+      .select('*, media(*), episodes(*)')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false });
+  }
+
+  const customCategories = await supabase
+    .from('custom_categories')
+    .select(`
+      *,
+      category_items(
+        *,
+        media(*)
+      )
+    `)
+    .order('position', { ascending: true });
+
+  return {
+    latestAdded: latestAdded.data || [],
+    popularMedia: popularMedia.data || [],
+    continueWatching: continueWatching.data || [],
+    customCategories: customCategories.data || []
+  };
 }
 
-export async function loadCustomCategories(supabase) {
+export async function createCategory(supabase, name) {
   return await supabase
     .from('custom_categories')
-    .select('*, category_items(*, media(*))')
-    .order('position');
+    .insert({ name });
+}
+
+export async function addMediaToCategory(
+  supabase,
+  categoryId,
+  mediaId
+) {
+  return await supabase
+    .from('category_items')
+    .insert({
+      category_id: categoryId,
+      media_id: mediaId
+    });
 }
